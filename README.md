@@ -1,16 +1,32 @@
-# React + Vite
+# AEGIS-SWARM // Distributed Autonomous GNC & Formal Safety Engine
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+[![Live Demo](https://img.shields.io/badge/Live-Vercel-38bdf8?style=flat-square&logo=vercel)](https://aegis-swarm.vercel.app)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-wtfchristina%2Faegis--swarm-0f172a?style=flat-square&logo=github)](https://github.com/wtfchristina/aegis-swarm)
+[![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-Currently, two official plugins are available:
+**Aegis-Swarm** is an advanced browser-based astrodynamics and distributed systems laboratory designed to model, simulate, and visually verify decentralized spacecraft swarms operating without a central ground controller.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Architectural & Mathematical Pillars
 
-## React Compiler
+### 1. Asynchronous Distributed Consensus & Lamport Vector Clocks
+* **Raft Consensus State Machine:** Nodes elect local partition leaders, manage terms, and replicate heartbeat logs over a simulated Inter-Satellite Link (ISL) mesh.
+* **Lamport Vector Clocks:** Every node maintains a vector clock to track causal delivery ordering across asynchronous message passing.
+* **Chaos Engineering:** Supports split-brain network partitions, Byzantine telemetry spoofing, and stochastic packet loss.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 2. Clohessy-Wiltshire Relative Dynamics & Yoshida Symplectic Integration
+* **Relative Motion:** Governed by linear Clohessy-Wiltshire equations in the local Hill / LVLH reference frame.
+* **Yoshida Symplectic Integrator ($4\text{th-Order}$):** Preserves Hamiltonian energy (Jacobi integral) over extended horizons, preventing exponential secular drift.
+* **Kahan Compensated Summation:** Eliminates IEEE-754 floating-point addition truncation error.
 
-## Expanding the Oxlint configuration
+### 3. Formal Control Barrier Functions (ZCBF)
+* **Safe Set Invariance:** Enforces pairwise center-to-center Euclidean separation distances $h_{ij} = \|\mathbf{r}_{ij}\|^2 - R_{\text{safe}}^2 \ge 0$.
+* **QP-Free Minimal Projection:** Minimally projects nominal actuator commands onto the safe half-space when approaching the influence horizon, guaranteeing zero collisions ($d_{\min} > R_{\text{safe}}$).
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Local Development & Quickstart
+
+```bash
+git clone [https://github.com/wtfchristina/aegis-swarm.git](https://github.com/wtfchristina/aegis-swarm.git)
+cd aegis-swarm
+npm install
+npm run dev
+
