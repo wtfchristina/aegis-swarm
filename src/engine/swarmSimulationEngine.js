@@ -100,6 +100,11 @@ export class SwarmSimulationEngine {
     this.cbfGamma = 1.6;
     this.formationKey = 'INTERFEROMETRY_RING';
 
+    // Environmental Perturbations (J2 Oblateness & Differential Drag)
+    this.j2PerturbationEnabled = true;
+    this.differentialDragEnabled = true;
+    this.inclinationRad = (97.4 * Math.PI) / 180; // Sun-Synchronous LEO reference inclination
+
     this.partitionActive = false;
     this.packetLossRate = 0.05;
     this.byzantineNodeId = null;
@@ -109,8 +114,33 @@ export class SwarmSimulationEngine {
     this.energyHistory = [];
     this.minDistanceHistory = [];
     this.cbfInterventionsCount = 0;
+    this.totalDeltaV = 0;
     this.activeLinks = [];
     this.activeCbfVectors = [];
+
+    // Asynchronous Background Co-Processor Worker
+    this.workerStatus = {
+      active: false,
+      workerTickCount: 0,
+      vectorClockChecksum: 0,
+      invariantVerified: true,
+    };
+
+    try {
+      this.worker = new Worker(new URL('./telemetryWorker.js', import.meta.url), {
+        type: 'module',
+      });
+      this.worker.onmessage = (e) => {
+        if (e.data.type === 'AUDIT_COMPLETE') {
+          this.workerStatus = {
+            active: true,
+            ...e.data.payload,
+          };
+        }
+      };
+    } catch {
+      this.worker = null;
+    }
 
     this.initSwarm();
   }
@@ -121,6 +151,7 @@ export class SwarmSimulationEngine {
     this.energyHistory = [];
     this.minDistanceHistory = [];
     this.cbfInterventionsCount = 0;
+    this.totalDeltaV = 0;
 
     for (let i = 0; i < this.nodeCount; i++) {
       const angle = (i / this.nodeCount) * Math.PI * 2;
@@ -143,6 +174,8 @@ export class SwarmSimulationEngine {
         ballisticVel: new KahanVector3(vx, vy, vz),
         initialHamiltonian: 0,
         currentHamiltonianDrift: 0,
+        ballisticCoeffRatio: 1 + (i - this.nodeCount / 2) * 0.08, // Differential B* drag ratio
+        deltaVUsed: 0,
 
         raftState: i === 0 ? 'LEADER' : 'FOLLOWER',
         term: 1,
@@ -181,23 +214,65 @@ export class SwarmSimulationEngine {
     });
   }
 
+  /**
+   * Schweighart-Sedwick J2-Modified Hill / Clohessy-Wiltshire Coefficient c
+   */
+  getJ2FactorS() {
+    if (!this.j2PerturbationEnabled) return 0;
+    const J2 = 1.08262668e-3;
+    const Re_r0 = 6378.137 / 6928.137; // 550 km LEO reference altitude
+    return (
+      1.5 * J2 * Re_r0 * Re_r0 * (1 + 3 * Math.cos(2 * this.inclinationRad))
+    );
+  }
+
   computeJacobiHamiltonian(pos, vel) {
     const v2 = vel.x * vel.x + vel.y * vel.y + vel.z * vel.z;
     const n2 = this.n * this.n;
-    const potential = -1.5 * n2 * (pos.x * pos.x) + 0.5 * n2 * (pos.z * pos.z);
+    const s = this.getJ2FactorS();
+    const c2 = 1 + s;
+    const kJ2 = 3 * n2 * c2 + 2 * n2 * s;
+    const omegaZ2 = n2 * (1 + 3 * s);
+    const potential = -0.5 * kJ2 * (pos.x * pos.x) + 0.5 * omegaZ2 * (pos.z * pos.z);
     return 0.5 * v2 + potential;
   }
 
-  computeAcceleration(pos, vel, u = { x: 0, y: 0, z: 0 }, includeCoriolis = true) {
+  computeAcceleration(
+    pos,
+    vel,
+    u = { x: 0, y: 0, z: 0 },
+    includeCoriolis = true,
+    node = null
+  ) {
     const n = this.n;
     const n2 = n * n;
-    const coriolisX = includeCoriolis ? 2 * n * vel.y : 0;
-    const coriolisY = includeCoriolis ? -2 * n * vel.x : 0;
+    const s = this.getJ2FactorS();
+    const c = Math.sqrt(1 + s);
+
+    const coriolisX = includeCoriolis ? 2 * n * c * vel.y : 0;
+    const coriolisY = includeCoriolis ? -2 * n * c * vel.x : 0;
+
+    // Schweighart-Sedwick J2 secular nodal regression & cross-track breathing
+    const kJ2 = (3 * c * c + 2 * s) * n2;
+    const omegaZ2 = (1 + 3 * s) * n2;
+    const j2CrossCouplingZ =
+      this.j2PerturbationEnabled && includeCoriolis
+        ? 0.004 * Math.sin(this.simTime * n) * pos.x
+        : 0;
+
+    // Differential Atmospheric Drag along In-Track (-Y) axis
+    let dragAy = 0;
+    let dragAx = 0;
+    if (this.differentialDragEnabled && node && includeCoriolis) {
+      const deltaBStar = node.ballisticCoeffRatio - 1.0;
+      dragAy = -0.018 * deltaBStar - 0.0012 * vel.y;
+      dragAx = -0.0008 * vel.x;
+    }
 
     return {
-      ax: 3 * n2 * pos.x + coriolisX + u.x,
-      ay: coriolisY + u.y,
-      az: -n2 * pos.z + u.z,
+      ax: kJ2 * pos.x + coriolisX + dragAx + u.x,
+      ay: coriolisY + dragAy + u.y,
+      az: -omegaZ2 * pos.z + j2CrossCouplingZ + u.z,
     };
   }
 
@@ -442,6 +517,11 @@ export class SwarmSimulationEngine {
     for (const node of this.nodes) {
       const u = this.computeGuidanceAndSafetyFilter(node);
 
+      // Accumulate Delta-V expenditure (scaled to m/s)
+      const dvStep = Math.hypot(u.x, u.y, u.z) * dt * 0.015;
+      node.deltaVUsed += dvStep;
+      this.totalDeltaV += dvStep;
+
       if (this.integratorMode === 'YOSHIDA_SYMPLECTIC') {
         for (let k = 0; k < 3; k++) {
           node.pos.addScaled(
@@ -450,7 +530,7 @@ export class SwarmSimulationEngine {
             node.vel.z,
             YOSHIDA_C[k] * dt
           );
-          const acc = this.computeAcceleration(node.pos, node.vel, u, true);
+          const acc = this.computeAcceleration(node.pos, node.vel, u, true, node);
           node.vel.addScaled(acc.ax, acc.ay, acc.az, YOSHIDA_D[k] * dt);
 
           node.ballisticPos.addScaled(
@@ -463,7 +543,8 @@ export class SwarmSimulationEngine {
             node.ballisticPos,
             node.ballisticVel,
             { x: 0, y: 0, z: 0 },
-            false
+            false,
+            null
           );
           node.ballisticVel.addScaled(
             bAcc.ax,
@@ -480,7 +561,7 @@ export class SwarmSimulationEngine {
           YOSHIDA_C[3] * dt
         );
       } else {
-        const acc = this.computeAcceleration(node.pos, node.vel, u, true);
+        const acc = this.computeAcceleration(node.pos, node.vel, u, true, node);
         node.pos.x += node.vel.x * dt;
         node.pos.y += node.vel.y * dt;
         node.pos.z += node.vel.z * dt;
@@ -492,7 +573,8 @@ export class SwarmSimulationEngine {
           node.ballisticPos,
           node.ballisticVel,
           { x: 0, y: 0, z: 0 },
-          false
+          false,
+          null
         );
         node.ballisticPos.x += node.ballisticVel.x * dt;
         node.ballisticPos.y += node.ballisticVel.y * dt;
@@ -537,5 +619,64 @@ export class SwarmSimulationEngine {
       safeThreshold: this.safetyRadius,
     });
     if (this.minDistanceHistory.length > 140) this.minDistanceHistory.shift();
+
+    // Dispatch state snapshot to Asynchronous Web Worker Co-Processor
+    if (this.worker) {
+      this.worker.postMessage({
+        type: 'AUDIT_SWARM',
+        payload: {
+          simTime: this.simTime,
+          safetyRadius: this.safetyRadius,
+          nodes: this.nodes.map((n) => ({
+            id: n.id,
+            x: n.pos.x,
+            y: n.pos.y,
+            z: n.pos.z,
+            vx: n.vel.x,
+            vy: n.vel.y,
+            vz: n.vel.z,
+            vectorClock: n.vectorClock,
+          })),
+        },
+      });
+    }
+  }
+
+  /**
+   * Generates standard NASA / CCSDS OEM (Orbit Ephemeris Message v2.0) Telemetry File
+   */
+  generateCCSDSOEM() {
+    const nowIso = new Date().toISOString();
+    let oem = `CCSDS_OEM_VERS = 2.0\n`;
+    oem += `CREATION_DATE  = ${nowIso}\n`;
+    oem += `ORIGINATOR     = AEGIS-SWARM AUTONOMOUS GNC LAB (CHRISTINA HOLT)\n`;
+    oem += `COMMENT        = Integrator: ${this.integratorMode} | J2 Oblateness: ${this.j2PerturbationEnabled ? 'ACTIVE' : 'OFF'} | ZCBF Filter: ${this.cbfEnabled ? 'ENGAGED' : 'BYPASSED'}\n`;
+    oem += `COMMENT        = Total Swarm Delta-V Expended: ${this.totalDeltaV.toFixed(4)} m/s | CBF Interventions: ${this.cbfInterventionsCount}\n\n`;
+
+    for (const node of this.nodes) {
+      oem += `META_START\n`;
+      oem += `OBJECT_NAME          = ${node.name}\n`;
+      oem += `OBJECT_ID            = 2026-AEGIS-0${node.id + 1}\n`;
+      oem += `CENTER_NAME          = CHIEF_LVLH_ORIGIN\n`;
+      oem += `REF_FRAME            = HILL_LVLH\n`;
+      oem += `TIME_SYSTEM          = UTC\n`;
+      oem += `META_STOP\n\n`;
+      oem += `COMMENT  Raft Role: ${node.raftState} (Term ${node.term}) | Partition: ${node.partitionGroup} | Lamport Vector Clock: [${node.vectorClock.join(', ')}]\n`;
+      oem += `COMMENT  Epoch(s)        X (km)          Y (km)          Z (km)          VX (km/s)       VY (km/s)       VZ (km/s)\n`;
+
+      const trailSlice = node.trail.slice(-10);
+      trailSlice.forEach((pt, idx) => {
+        const t = Math.max(0, this.simTime - (trailSlice.length - idx) * 0.08).toFixed(3);
+        const xKm = (pt.x / 1000).toExponential(6);
+        const yKm = (pt.y / 1000).toExponential(6);
+        const zKm = (pt.z / 1000).toExponential(6);
+        const vxKm = (node.vel.x / 1000).toExponential(6);
+        const vyKm = (node.vel.y / 1000).toExponential(6);
+        const vzKm = (node.vel.z / 1000).toExponential(6);
+        oem += `${t.padStart(10, ' ')}  ${xKm}  ${yKm}  ${zKm}  ${vxKm}  ${vyKm}  ${vzKm}\n`;
+      });
+      oem += `\n`;
+    }
+    return oem;
   }
 }

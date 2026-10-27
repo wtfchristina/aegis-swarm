@@ -12,6 +12,9 @@ import {
   Lock,
   Unlock,
   GitBranch,
+  Download,
+  Globe,
+  Wind,
 } from 'lucide-react';
 import { SwarmSimulationEngine, FORMATIONS } from './engine/swarmSimulationEngine';
 import SwarmViewport3D from './components/SwarmViewport3D';
@@ -60,6 +63,27 @@ export default function App() {
     setTelemetryTick((t) => t + 1);
   };
 
+  const handleToggleJ2 = () => {
+    eng.j2PerturbationEnabled = !eng.j2PerturbationEnabled;
+    setTelemetryTick((t) => t + 1);
+  };
+
+  const handleToggleDrag = () => {
+    eng.differentialDragEnabled = !eng.differentialDragEnabled;
+    setTelemetryTick((t) => t + 1);
+  };
+
+  const handleExportCCSDS = () => {
+    const oemContent = eng.generateCCSDSOEM();
+    const blob = new Blob([oemContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `AEGIS_SWARM_CCSDS_OEM_${Math.floor(eng.simTime)}s.oem`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleReset = () => {
     eng.initSwarm();
     setTelemetryTick((t) => t + 1);
@@ -75,12 +99,21 @@ export default function App() {
               AEGIS-SWARM // DISTRIBUTED AUTONOMOUS GNC & FORMAL SAFETY LAB
             </h1>
             <p style={styles.subtitle}>
-              Raft Consensus Mesh • 4th-Order Yoshida Symplectic Integrator (Kahan Float64) • Control Barrier Functions (ZCBF)
+              Raft Consensus Mesh • 4th-Order Yoshida Symplectic (Kahan Float64) • J₂ Oblateness • Control Barrier Functions (ZCBF)
             </p>
           </div>
         </div>
 
         <div style={styles.headerMetrics}>
+          <div style={styles.metricBadge}>
+            <span style={styles.metricLabel}>WORKER THREAD AUDIT</span>
+            <span style={{ ...styles.metricValue, color: '#00f5d4', fontSize: 12 }}>
+              {eng.workerStatus.active
+                ? `SYNC #${eng.workerStatus.workerTickCount}`
+                : 'LOCAL LOOP'}
+            </span>
+          </div>
+
           <div style={styles.metricBadge}>
             <span style={styles.metricLabel}>MIN SEPARATION (d_min)</span>
             <span
@@ -112,6 +145,13 @@ export default function App() {
           </div>
 
           <div style={styles.metricBadge}>
+            <span style={styles.metricLabel}>SWARM ΔV EXPENDED</span>
+            <span style={{ ...styles.metricValue, color: '#facc15' }}>
+              {eng.totalDeltaV.toFixed(2)} m/s
+            </span>
+          </div>
+
+          <div style={styles.metricBadge}>
             <span style={styles.metricLabel}>CBF INTERVENTIONS</span>
             <span style={{ ...styles.metricValue, color: '#f43f5e' }}>
               {eng.cbfInterventionsCount}
@@ -119,6 +159,14 @@ export default function App() {
           </div>
 
           <div style={styles.simControls}>
+            <button
+              onClick={handleExportCCSDS}
+              style={styles.exportBtn}
+              title="Download NASA/CCSDS OEM v2.0 Ephemeris Telemetry"
+            >
+              <Download size={14} />
+              <span>CCSDS OEM</span>
+            </button>
             <button
               onClick={() => setIsRunning(!isRunning)}
               style={styles.iconBtn}
@@ -211,11 +259,11 @@ export default function App() {
             <div style={styles.cardHeader}>
               <Cpu size={15} color="#00f5d4" />
               <span style={styles.cardTitle}>
-                2. NUMERICAL INTEGRATOR & PRECISION
+                2. SYMPLECTIC INTEGRATOR & PERTURBATIONS
               </span>
             </div>
             <p style={styles.cardDesc}>
-              Compare 4th-order symplectic phase-space conservation with Kahan summation against explicit 1st-order Euler truncation drift.
+              Compare 4th-order symplectic integration against Explicit Euler, and toggle Schweighart-Sedwick J₂ oblateness & differential drag.
             </p>
 
             <div style={styles.SegmentGroup}>
@@ -250,6 +298,32 @@ export default function App() {
                 }}
               >
                 Naive Explicit Euler (Drifts)
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <button
+                onClick={handleToggleJ2}
+                style={{
+                  ...styles.perturbationBtn,
+                  backgroundColor: eng.j2PerturbationEnabled ? '#0c4a6e' : '#090d16',
+                  borderColor: eng.j2PerturbationEnabled ? '#38bdf8' : '#1e293b',
+                }}
+              >
+                <Globe size={13} color="#38bdf8" />
+                <span>J₂ Oblateness: {eng.j2PerturbationEnabled ? 'ON' : 'OFF'}</span>
+              </button>
+
+              <button
+                onClick={handleToggleDrag}
+                style={{
+                  ...styles.perturbationBtn,
+                  backgroundColor: eng.differentialDragEnabled ? '#0c4a6e' : '#090d16',
+                  borderColor: eng.differentialDragEnabled ? '#00f5d4' : '#1e293b',
+                }}
+              >
+                <Wind size={13} color="#00f5d4" />
+                <span>Diff. Drag: {eng.differentialDragEnabled ? 'ON' : 'OFF'}</span>
               </button>
             </div>
           </section>
@@ -568,13 +642,13 @@ const styles = {
   headerMetrics: {
     display: 'flex',
     alignItems: 'center',
-    gap: 14,
+    gap: 10,
   },
   metricBadge: {
     backgroundColor: '#0f172a',
     border: '1px solid #1e293b',
     borderRadius: 6,
-    padding: '5px 12px',
+    padding: '5px 10px',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
@@ -586,12 +660,25 @@ const styles = {
     letterSpacing: '0.05em',
   },
   metricValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 800,
     fontFamily: 'monospace',
   },
   simControls: {
     display: 'flex',
+    gap: 6,
+  },
+  exportBtn: {
+    backgroundColor: '#0284c7',
+    border: '1px solid #38bdf8',
+    color: '#ffffff',
+    borderRadius: 6,
+    padding: '0 10px',
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
     gap: 6,
   },
   iconBtn: {
@@ -666,6 +753,19 @@ const styles = {
     alignItems: 'center',
     gap: 8,
     textAlign: 'left',
+  },
+  perturbationBtn: {
+    flex: 1,
+    padding: '7px 8px',
+    borderRadius: 6,
+    border: '1px solid #1e293b',
+    color: '#e2e8f0',
+    fontSize: 10,
+    fontWeight: 700,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 5,
   },
   sliderRow: {
     marginTop: 10,
