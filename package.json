@@ -1,12 +1,13 @@
 {
   "name": "aegis-swarm-gnc",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tests/verifyInvariants.js"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",
