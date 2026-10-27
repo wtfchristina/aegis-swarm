@@ -11,7 +11,7 @@ export default function SwarmViewport3D({ engineRef }) {
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x050811);
-    scene.fog = new THREE.FogExp2(0x050811, 0.0035);
+    scene.fog = new THREE.FogExp2(0x050811, 0.0032);
 
     const camera = new THREE.PerspectiveCamera(
       50,
@@ -20,7 +20,10 @@ export default function SwarmViewport3D({ engineRef }) {
       1000
     );
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
@@ -48,6 +51,7 @@ export default function SwarmViewport3D({ engineRef }) {
     const originMesh = new THREE.Mesh(originGeo, originMat);
     scene.add(originMesh);
 
+    // 1,400-Star Deep-Space Backdrop
     const starCount = 1400;
     const starPositions = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount * 3; i += 3) {
@@ -121,6 +125,24 @@ export default function SwarmViewport3D({ engineRef }) {
       trailLines.push({ line: trailLine, geo: trailGeo, positions: trailPositions });
     }
 
+    // Item 3: 5,000-Node GPU InstancedMesh for WebGPU Compute Swarm
+    const maxGpuNodes = engine.massiveSwarmCount;
+    const instGeo = new THREE.OctahedronGeometry(0.45, 0);
+    const instMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.78,
+    });
+    const instancedSwarmMesh = new THREE.InstancedMesh(
+      instGeo,
+      instMat,
+      maxGpuNodes
+    );
+    instancedSwarmMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    instancedSwarmMesh.visible = false;
+    scene.add(instancedSwarmMesh);
+    const dummyMatrix = new THREE.Matrix4();
+
     const islGeo = new THREE.BufferGeometry();
     const islPositions = new Float32Array(engine.nodeCount * engine.nodeCount * 6);
     islGeo.setAttribute('position', new THREE.BufferAttribute(islPositions, 3));
@@ -166,7 +188,10 @@ export default function SwarmViewport3D({ engineRef }) {
       const dy = e.clientY - prevMouse.y;
       prevMouse = { x: e.clientX, y: e.clientY };
       spherical.theta += dx * 0.006;
-      spherical.phi = Math.max(0.15, Math.min(Math.PI - 0.15, spherical.phi - dy * 0.006));
+      spherical.phi = Math.max(
+        0.15,
+        Math.min(Math.PI - 0.15, spherical.phi - dy * 0.006)
+      );
       updateCameraPosition();
     };
     const onPointerUp = () => {
@@ -174,7 +199,10 @@ export default function SwarmViewport3D({ engineRef }) {
     };
     const onWheel = (e) => {
       e.preventDefault();
-      spherical.radius = Math.max(45, Math.min(260, spherical.radius + e.deltaY * 0.08));
+      spherical.radius = Math.max(
+        45,
+        Math.min(280, spherical.radius + e.deltaY * 0.08)
+      );
       updateCameraPosition();
     };
 
@@ -244,6 +272,24 @@ export default function SwarmViewport3D({ engineRef }) {
         }
         trailObj.geo.setDrawRange(0, trailLen);
         trailObj.geo.attributes.position.needsUpdate = true;
+      }
+
+      // Update 5,000-Node GPU Compute Swarm InstancedMesh
+      if (eng.massiveSwarmEnabled && eng.gpuSwarm) {
+        instancedSwarmMesh.visible = true;
+        const gpuPos = eng.gpuSwarm.positions;
+        for (let i = 0; i < maxGpuNodes; i++) {
+          const idx = i * 4;
+          dummyMatrix.makeTranslation(
+            gpuPos[idx],
+            gpuPos[idx + 1],
+            gpuPos[idx + 2]
+          );
+          instancedSwarmMesh.setMatrixAt(i, dummyMatrix);
+        }
+        instancedSwarmMesh.instanceMatrix.needsUpdate = true;
+      } else {
+        instancedSwarmMesh.visible = false;
       }
 
       let islIdx = 0;

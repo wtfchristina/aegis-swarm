@@ -1,4 +1,3 @@
-// Asynchronous Web Worker Co-Processor for Consensus & Ephemeris Auditing (Safari-Safe)
 let workerTickCount = 0;
 
 self.onmessage = (e) => {

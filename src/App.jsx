@@ -15,6 +15,7 @@ import {
   Download,
   Globe,
   Wind,
+  Layers,
 } from 'lucide-react';
 import { SwarmSimulationEngine, FORMATIONS } from './engine/swarmSimulationEngine';
 import SwarmViewport3D from './components/SwarmViewport3D';
@@ -73,13 +74,29 @@ export default function App() {
     setTelemetryTick((t) => t + 1);
   };
 
-  const handleExportCCSDS = () => {
-    const oemContent = eng.generateCCSDSOEM();
-    const blob = new Blob([oemContent], { type: 'text/plain;charset=utf-8' });
+  const handleToggleMassiveSwarm = () => {
+    eng.massiveSwarmEnabled = !eng.massiveSwarmEnabled;
+    setTelemetryTick((t) => t + 1);
+  };
+
+  const handleExportOEM = () => {
+    const content = eng.generateCCSDSOEM();
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `AEGIS_SWARM_CCSDS_OEM_${Math.floor(eng.simTime)}s.oem`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportOMM = () => {
+    const content = eng.generateCCSDSOMM();
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `AEGIS_SWARM_CCSDS_OMM_${Math.floor(eng.simTime)}s.omm`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -99,18 +116,16 @@ export default function App() {
               AEGIS-SWARM // DISTRIBUTED AUTONOMOUS GNC & FORMAL SAFETY LAB
             </h1>
             <p style={styles.subtitle}>
-              Raft Consensus Mesh • 4th-Order Yoshida Symplectic (Kahan Float64) • J₂ Oblateness • Control Barrier Functions (ZCBF)
+              Raft Consensus • Yoshida Symplectic + J₂/Drag Perturbations • 5,000-Node WebGPU Compute • Control Barrier Functions (ZCBF)
             </p>
           </div>
         </div>
 
         <div style={styles.headerMetrics}>
           <div style={styles.metricBadge}>
-            <span style={styles.metricLabel}>WORKER THREAD AUDIT</span>
-            <span style={{ ...styles.metricValue, color: '#00f5d4', fontSize: 12 }}>
-              {eng.workerStatus.active
-                ? `SYNC #${eng.workerStatus.workerTickCount}`
-                : 'LOCAL LOOP'}
+            <span style={styles.metricLabel}>ACTIVE NODES</span>
+            <span style={{ ...styles.metricValue, color: '#00f5d4' }}>
+              {eng.massiveSwarmEnabled ? '5,008 (GPU)' : '8 (QUORUM)'}
             </span>
           </div>
 
@@ -145,9 +160,9 @@ export default function App() {
           </div>
 
           <div style={styles.metricBadge}>
-            <span style={styles.metricLabel}>SWARM ΔV EXPENDED</span>
-            <span style={{ ...styles.metricValue, color: '#facc15' }}>
-              {eng.totalDeltaV.toFixed(2)} m/s
+            <span style={styles.metricLabel}>SWARM ΔV / J₂ Ω̇</span>
+            <span style={{ ...styles.metricValue, color: '#facc15', fontSize: 12 }}>
+              {eng.totalDeltaV.toFixed(1)}m/s | {eng.getNodalRegressionDegPerDay().toFixed(2)}°/d
             </span>
           </div>
 
@@ -160,12 +175,20 @@ export default function App() {
 
           <div style={styles.simControls}>
             <button
-              onClick={handleExportCCSDS}
+              onClick={handleExportOEM}
               style={styles.exportBtn}
-              title="Download NASA/CCSDS OEM v2.0 Ephemeris Telemetry"
+              title="Download NASA/CCSDS OEM v2.0 State Vector Ephemeris"
             >
-              <Download size={14} />
-              <span>CCSDS OEM</span>
+              <Download size={13} />
+              <span>OEM</span>
+            </button>
+            <button
+              onClick={handleExportOMM}
+              style={{ ...styles.exportBtn, backgroundColor: '#0f766e', borderColor: '#14b8a6' }}
+              title="Download NASA/CCSDS OMM v2.0 Mean Orbital Elements & Maneuver Log"
+            >
+              <Download size={13} />
+              <span>OMM</span>
             </button>
             <button
               onClick={() => setIsRunning(!isRunning)}
@@ -259,11 +282,11 @@ export default function App() {
             <div style={styles.cardHeader}>
               <Cpu size={15} color="#00f5d4" />
               <span style={styles.cardTitle}>
-                2. SYMPLECTIC INTEGRATOR & PERTURBATIONS
+                2. PERTURBED ASTRODYNAMICS & WEBGPU
               </span>
             </div>
             <p style={styles.cardDesc}>
-              Compare 4th-order symplectic integration against Explicit Euler, and toggle Schweighart-Sedwick J₂ oblateness & differential drag.
+              Schweighart-Sedwick J₂ oblateness, differential ballistic drag (C_D·A/m), and 5,000-node WGSL GPU compute shader scaling.
             </p>
 
             <div style={styles.SegmentGroup}>
@@ -326,6 +349,44 @@ export default function App() {
                 <span>Diff. Drag: {eng.differentialDragEnabled ? 'ON' : 'OFF'}</span>
               </button>
             </div>
+
+            <div style={styles.sliderRow}>
+              <div style={styles.sliderHeader}>
+                <span>ORBIT INCLINATION (J₂ NODAL PRECESSION)</span>
+                <span style={{ color: '#00f5d4' }}>
+                  {eng.inclinationDeg.toFixed(1)}° ({eng.getNodalRegressionDegPerDay().toFixed(2)}°/d)
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="110"
+                step="0.5"
+                value={eng.inclinationDeg}
+                onChange={(e) => {
+                  eng.inclinationDeg = parseFloat(e.target.value);
+                  setTelemetryTick((t) => t + 1);
+                }}
+                style={styles.slider}
+              />
+            </div>
+
+            <button
+              onClick={handleToggleMassiveSwarm}
+              style={{
+                ...styles.actionBtn,
+                marginTop: 8,
+                backgroundColor: eng.massiveSwarmEnabled ? '#065f46' : '#0f172a',
+                borderColor: eng.massiveSwarmEnabled ? '#00f5d4' : '#334155',
+              }}
+            >
+              <Layers size={14} color="#00f5d4" />
+              <span>
+                {eng.massiveSwarmEnabled
+                  ? `5,000-NODE WEBGPU SWARM: ACTIVE (${eng.gpuSwarm.lastStepMs.toFixed(2)}ms)`
+                  : 'LAUNCH 5,000-NODE WEBGPU COMPUTE SWARM'}
+              </span>
+            </button>
           </section>
 
           <section style={styles.card}>
@@ -403,7 +464,7 @@ export default function App() {
             </div>
             <div style={styles.legendItem}>
               <span style={{ ...styles.dot, backgroundColor: '#38bdf8' }} />
-              <span>Follower (Beta Partition)</span>
+              <span>Follower (Beta / 5k WebGPU Torus)</span>
             </div>
             <div style={styles.legendItem}>
               <span style={{ ...styles.dot, backgroundColor: '#f43f5e' }} />
@@ -673,13 +734,13 @@ const styles = {
     border: '1px solid #38bdf8',
     color: '#ffffff',
     borderRadius: 6,
-    padding: '0 10px',
+    padding: '0 9px',
     fontSize: 11,
     fontWeight: 700,
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   iconBtn: {
     backgroundColor: '#1e293b',
