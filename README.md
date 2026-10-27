@@ -1,6 +1,8 @@
 # AEGIS-SWARM // Distributed Autonomous GNC, WebGPU Compute & Formal Safety Lab
 
-[![Live Demo](https://img.shields.io/badge/Live-Vercel-38bdf8?style=flat-square&logo=vercel)](https://aegis-swarm.vercel.app)
+![Aegis-Swarm Hero](hero.jpg)
+
+[![Live Demo](https://img.shields.io/badge/Live-Vercel-38bdf8?style=flat-square&logo=vercel)](https://aegis-swarm-beryl.vercel.app/)
 [![GitHub Repository](https://img.shields.io/badge/GitHub-wtfchristina%2Faegis--swarm-0f172a?style=flat-square&logo=github)](https://github.com/wtfchristina/aegis-swarm)
 [![CCSDS Standard](https://img.shields.io/badge/Telemetry-CCSDS%20OEM%20%2F%20OMM%20v2.0-facc15?style=flat-square)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg?style=flat-square)](https://opensource.org/licenses/MIT)
